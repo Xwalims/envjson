@@ -213,6 +213,37 @@ envjson .env --redact
 Add your own names with `--redact-keys session,csrf`. An empty value stays
 empty rather than becoming a mask — masking `""` would invent a secret.
 
+### Passwords inside connection strings
+
+Key name is a weak signal for a URL. `DATABASE_URL`, `REDIS_DSN` and `BACKEND`
+all hide a password behind an innocuous name, so `--redact` also masks the
+userinfo section of any value that looks like a connection string:
+
+```bash
+envjson .env --redact
+```
+
+```json
+{
+  "DATABASE_URL": "postgres://appuser:***@db.internal:5432/app",
+  "REDIS_URL": "redis://:***@cache:6379/0",
+  "SITE_URL": "https://example.com/docs",
+  "API_TOKEN": "***REDACTED***"
+}
+```
+
+Two masks, on purpose: `***` is a password taken out of a URL that is otherwise
+readable, `***REDACTED***` is a whole value whose key says it is secret. The
+username may be empty, which is the usual Redis form:
+
+| Value | Result |
+| --- | --- |
+| `postgres://user:pw@host/db` | `postgres://user:***@host/db` |
+| `redis://:pw@host:6379/0` | `redis://:***@host:6379/0` |
+| `mysql://user@host/db` | unchanged, no password |
+| `http://host:8080/path` | unchanged, not a credential |
+| `scheme://user:@host` | unchanged, empty password |
+
 ## Output formats
 
 `--format json` (default), `ndjson`/`jsonl`, `ini`, `properties`.

@@ -30,6 +30,14 @@ const FORMATS = Object.freeze(['json', 'ndjson', 'jsonl', 'ini', 'properties']);
 const MASK = '***REDACTED***';
 
 /**
+ * Mask written in place of a password inside a connection string. Distinct
+ * from MASK so a reader can tell "this whole value was secret" from "this URL
+ * had a password in it", which is the difference between a leaked key and a
+ * leaked database password.
+ */
+const INLINE_URL_MASK = '***';
+
+/**
  * Key fragments that make a key look secret. Matched case-insensitively
  * anywhere in the key name.
  */
@@ -52,4 +60,4 @@ const EXIT = Object.freeze({
   DRIFT: 3,
 });
 
-module.exports = { DEFAULTS, FORMATS, MASK, SECRET_PATTERNS, EXIT };
+module.exports = { DEFAULTS, FORMATS, MASK, INLINE_URL_MASK, SECRET_PATTERNS, EXIT };
