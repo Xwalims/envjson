@@ -1,0 +1,33 @@
+{
+  "name": "envjson",
+  "version": "0.1.0",
+  "description": "Read .env / .ini / .properties files, merge layers, emit JSON. Zero dependencies.",
+  "main": "src/index.js",
+  "bin": {
+    "envjson": "bin/envjson.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "dotenv",
+    "env",
+    "ini",
+    "properties",
+    "json",
+    "ndjson",
+    "config",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "Xwalims",
+  "engines": {
+    "node": ">=20"
+  }
+}
