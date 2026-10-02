@@ -8,6 +8,24 @@ Zero dependencies. Node >= 20. Built on `node:test`, so `npm test` needs nothing
 node bin/envjson.js .env
 ```
 
+<!-- hero -->
+
+[![CI](https://github.com/envjson/actions/workflows/ci.yml/badge.svg)](https://github.com/envjson/actions/workflows/ci.yml)
+![node 20+](https://img.shields.io/badge/node-20+-brightgreen)
+![MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![dependencies](https://img.shields.io/badge/dependencies-none-2f6f4f)
+
+## Contents
+
+- [Why this exists](#why-this-exists)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Output formats](#output-formats)
+- [Exit codes](#exit-codes)
+- [License](#license)
+
+<!-- /hero -->
+
 ## Why this exists
 
 Most dotenv readers are wrong in small ways that only bite in production: they
