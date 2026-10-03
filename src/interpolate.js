@@ -1,6 +1,7 @@
 'use strict';
 
 const { InterpolationError } = require('./errors.js');
+const { assignKey, hasKey, copyOwn } = require('./keysafe.js');
 
 /**
  * Shell-style expansion, applied only to double-quoted and unquoted values.
@@ -141,7 +142,7 @@ function resolveRef(ref, lookup, chain, maxDepth, options) {
  */
 function makeLookup(source, useProcessEnv) {
   return function lookup(name) {
-    if (Object.prototype.hasOwnProperty.call(source, name)) return source[name];
+    if (hasKey(source, name)) return source[name];
     if (useProcessEnv && process.env && process.env[name] !== undefined) return process.env[name];
     return undefined;
   };
@@ -171,7 +172,7 @@ function referencesSelf(template, key) {
 function expandTemplates(object, templates, options = {}) {
   const useProcessEnv = options.useProcessEnv !== false;
   const maxPasses = options.maxPasses || MAX_DEPTH;
-  let current = Object.assign({}, object);
+  let current = copyOwn(object);
   let errors = [];
   const seenErrors = new Set();
 
@@ -184,25 +185,25 @@ function expandTemplates(object, templates, options = {}) {
     for (const [key, value] of Object.entries(current)) {
       const template = templates.get(key);
       if (template === null || template === undefined) {
-        next[key] = value;
+        assignKey(next, key, value);
         continue;
       }
       let lookup = base;
       if (referencesSelf(template, key)) {
-        const scope = Object.assign({}, current);
+        const scope = copyOwn(current);
         delete scope[key];
         lookup = makeLookup(scope, useProcessEnv);
       }
       try {
         const expanded = expand(template, lookup, options);
         if (expanded !== value) changed = true;
-        next[key] = expanded;
+        assignKey(next, key, expanded);
       } catch (err) {
         if (!seenErrors.has(key)) {
           seenErrors.add(key);
           errors.push({ key, message: err.message });
         }
-        next[key] = value;
+        assignKey(next, key, value);
       }
     }
 

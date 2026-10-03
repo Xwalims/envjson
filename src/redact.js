@@ -1,6 +1,7 @@
 'use strict';
 
 const { SECRET_PATTERNS, MASK, INLINE_URL_MASK } = require('./defaults.js');
+const { assignKey } = require('./keysafe.js');
 
 /**
  * Escape a caller-supplied key name so it is matched as LITERAL text.
@@ -87,12 +88,12 @@ function redactObject(object, options = {}) {
   for (const [key, value] of Object.entries(object)) {
     if (isSecretKey(key, matcher)) {
       redactedKeys.push(key);
-      out[key] = value === '' ? '' : mask;
+      assignKey(out, key, value === '' ? '' : mask);
       continue;
     }
     const masked = maskUrlUserinfo(value, inlineMask);
     if (masked.changed) urlMasks.push(key);
-    out[key] = masked.value;
+    assignKey(out, key, masked.value);
   }
   return { object: out, redactedKeys, urlMasks };
 }

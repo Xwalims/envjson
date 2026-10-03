@@ -1,6 +1,7 @@
 'use strict';
 
 const { UsageError } = require('./errors.js');
+const { assignKey } = require('./keysafe.js');
 
 /** Dialects understood by the parser. */
 const DIALECTS = Object.freeze(['dotenv', 'ini', 'properties']);
@@ -245,9 +246,9 @@ function parse(text, options = {}) {
 function toObject(result) {
   const out = {};
   if (result && Array.isArray(result.entries)) {
-    for (const entry of result.entries) out[entry.key] = entry.value;
+    for (const entry of result.entries) assignKey(out, entry.key, entry.value);
   } else {
-    for (const [k, v] of Object.entries(result || {})) out[k] = v;
+    for (const [k, v] of Object.entries(result || {})) assignKey(out, k, v);
   }
   return out;
 }

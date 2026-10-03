@@ -2,6 +2,7 @@
 
 const { parse, toObject, isPureReference } = require('./parser.js');
 const { expand, makeLookup, referencesSelf, MAX_DEPTH } = require('./interpolate.js');
+const { assignKey, hasKey, copyOwn } = require('./keysafe.js');
 
 /**
  * Accept a plain object OR a list of [key, value] pairs (which is what the CLI
@@ -85,7 +86,7 @@ function merge(layers, options = {}) {
       const key = entry.key;
       const rawValue = entry.value;
       const template = entry.quoted === 'single' ? null : entry.expression;
-      const exists = Object.prototype.hasOwnProperty.call(out, key);
+      const exists = hasKey(out, key);
 
       // --- 1. precedence ------------------------------------------------
       if (exists && template !== null && isPureReference(template)) {
@@ -133,35 +134,35 @@ function merge(layers, options = {}) {
       }
 
       // --- 2. commit raw, remember what this key used to be -------------
-      if (exists) inherited[key] = out[key];
+      if (exists) assignKey(inherited, key, out[key]);
       else delete inherited[key];
-      out[key] = rawValue;
+      assignKey(out, key, rawValue);
       templates.set(key, template);
-      provenance[key] = { file: name, line: entry.line, quoted: entry.quoted, template };
+      assignKey(provenance, key, { file: name, line: entry.line, quoted: entry.quoted, template });
     }
   });
 
   // --- 3. resolve every template against the finished object -------------
-  const scope = Object.assign({}, out);
+  const scope = copyOwn(out);
   const object = {};
   const errors = [];
 
   for (const key of Object.keys(out)) {
     const template = templates.get(key);
     if (template === null) {
-      object[key] = out[key];
+      assignKey(object, key, out[key]);
       continue;
     }
-    const local = Object.assign({}, scope);
+    const local = copyOwn(scope);
     if (referencesSelf(template, key)) {
-      if (Object.prototype.hasOwnProperty.call(inherited, key)) {
-        local[key] = inherited[key];
+      if (hasKey(inherited, key)) {
+        assignKey(local, key, inherited[key]);
       } else {
         delete local[key];
       }
     }
     try {
-      object[key] = expand(template, makeLookup(local, useProcessEnv), { maxDepth });
+      assignKey(object, key, expand(template, makeLookup(local, useProcessEnv), { maxDepth }));
     } catch (err) {
       failedKeys.add(key);
       errors.push({ key, message: err.message });

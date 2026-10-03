@@ -22,6 +22,7 @@ node bin/envjson.js .env
 - [Quick start](#quick-start)
 - [Output formats](#output-formats)
 - [Exit codes](#exit-codes)
+- [Keys named `__proto__`](#keys-named-__proto__)
 - [License](#license)
 
 <!-- /hero -->
@@ -359,6 +360,46 @@ port = 8080
 becomes `server.host` and `server.port`. Pass `format: 'properties'` (or a
 `.properties` filename) to keep dots in the key name instead.
 
+## Keys named `__proto__`
+
+A `.env` file may legitimately define a variable called `__proto__`, and envjson
+keeps it — in the merged object, in every output format, and through redaction
+and interpolation:
+
+```dotenv
+__proto__=polluted
+A=1
+```
+
+```json
+{
+  "__proto__": "polluted",
+  "A": "1"
+}
+```
+
+This is worth spelling out because the naive implementation loses the key with no
+error at all. `__proto__` is not a property of the prototype; it is an **accessor**
+defined on `Object.prototype`, so `object.__proto__ = value` runs a setter that
+replaces the object's prototype instead of creating a key:
+
+```js
+const o = {};
+o.__proto__ = 'polluted';
+Object.keys(o);       // []  — the variable is gone
+JSON.stringify(o);    // {}
+```
+
+envjson writes every map through `assignKey()` in `src/keysafe.js`, which uses
+`Object.defineProperty` for that one name and plain assignment for everything
+else. The result is byte-identical to `JSON.parse('{"__proto__":"polluted"}')`,
+and no internal object is ever re-prototyped. `constructor`, `toString` and
+`hasOwnProperty` need no special handling: those are ordinary data properties, so
+assigning to them shadows the inherited one exactly as `JSON.parse` does.
+
+Consumers should do the same when reading this output. `merged.object.__proto__`
+is the string `"polluted"`, not the prototype.
+
 ## API
 
 ```js
@@ -389,9 +430,9 @@ node --test
 ```
 
 ```
-ℹ tests 135
+ℹ tests 186
 ℹ suites 0
-ℹ pass 135
+ℹ pass 186
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
