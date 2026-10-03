@@ -62,7 +62,9 @@ function parseArgs(argv) {
   let noMoreFlags = false;
 
   const needValue = (flag, value) => {
-    if (value === undefined) throw new UsageError(`${flag} requires a value`);
+    if (value === undefined || value === '') {
+      throw new UsageError(`${flag} requires a value`);
+    }
   };
 
   while (i < argv.length) {
@@ -111,11 +113,13 @@ function parseArgs(argv) {
         options.redact = true;
         i += 1;
         break;
-      case '--redact-keys':
-        needValue(flag, take(flag));
-        options.redactKeys.push(...splitList(argv[i]));
+      case '--redact-keys': {
+        const value = take(flag);
+        needValue(flag, value);
+        options.redactKeys.push(...splitList(value));
         i += 1;
         break;
+      }
       case '--format':
       case '-f': {
         const value = take(flag);

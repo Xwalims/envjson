@@ -216,6 +216,14 @@ envjson .env --redact
 Add your own names with `--redact-keys session,csrf`. An empty value stays
 empty rather than becoming a mask — masking `""` would invent a secret.
 
+`--redact-keys` is matched **literally**, not compiled as a pattern: `.*` masks
+nothing extra, and a name like `(` is a name rather than a syntax error. This
+matters for dotted keys — `--redact-keys DB.URI` masks `DB.URI` and leaves
+`DB.URL` alone, where a pattern would have matched both. Every flag that takes a
+value accepts both spellings, so `--redact-keys a,b` and `--redact-keys=a,b` do
+the same thing. An empty value (`--redact-keys=`) is a usage error rather than a
+silent no-op.
+
 ### Passwords inside connection strings
 
 Key name is a weak signal for a URL. `DATABASE_URL`, `REDIS_DSN` and `BACKEND`

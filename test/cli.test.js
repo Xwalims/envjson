@@ -67,6 +67,71 @@ test('--redact-keys parses a comma list', () => {
   assert.deepStrictEqual(parseArgs(['--redact-keys', 'a, b ,c']).redactKeys, ['a', 'b', 'c']);
 });
 
+// A flag that takes a value must accept BOTH spellings and produce the same
+// option. `--redact-keys` used to read argv[i] instead of the value `take()`
+// had already resolved, so the inline form consumed the flag's own name as a
+// mask pattern and the caller's key list was silently discarded.
+test('every value-taking flag behaves the same in inline and separate form', () => {
+  const pairs = [
+    [['--redact-keys', 'a,b'], ['--redact-keys=a,b'], (o) => o.redactKeys],
+    [['--format', 'ini'], ['--format=ini'], (o) => o.format],
+    [['--output', 'x.json'], ['--output=x.json'], (o) => o.out],
+    [['--env', 'A=1'], ['--env=A=1'], (o) => o.env],
+  ];
+  for (const [separate, inline, pick] of pairs) {
+    assert.deepStrictEqual(
+      pick(parseArgs(inline)),
+      pick(parseArgs(separate)),
+      `${inline.join(' ')} must behave like ${separate.join(' ')}`
+    );
+  }
+});
+
+test('an inline --redact-keys value is split on commas, not on the flag name', () => {
+  assert.deepStrictEqual(parseArgs(['--redact-keys=a,b']).redactKeys, ['a', 'b']);
+});
+
+test('a flag name never leaks into the parsed value', () => {
+  for (const argv of [
+    ['--redact-keys=session'],
+    ['--format=ini'],
+    ['--output=x.json'],
+    ['--env=A=1'],
+  ]) {
+    const dump = JSON.stringify(parseArgs(argv));
+    assert.doesNotMatch(dump, /--(redact-keys|format|output|env)=/, `${argv} leaked the flag name`);
+  }
+});
+
+test('--redact-keys=VALUE still masks the key end to end', () => {
+  const r = run(['--env', 'SESSION=abc', '--redact-keys=session', '--redact']);
+  assert.strictEqual(r.code, EXIT.OK);
+  assert.strictEqual(JSON.parse(r.out).SESSION, '***REDACTED***');
+});
+
+test('an odd key name is treated as a literal name, end to end and without crashing', () => {
+  // `(` used to be spliced into the matcher verbatim and threw an uncaught
+  // SyntaxError, killing the process instead of exiting 2. Escaping makes every
+  // name match only itself, so this is now simply a weird key name.
+  const r = run(['--env', 'SESSION=abc', '--redact-keys', '(']);
+  assert.strictEqual(r.code, EXIT.OK);
+  assert.doesNotThrow(() => JSON.parse(r.out));
+});
+
+test('a key name of `.*` masks only itself and leaves the rest readable', () => {
+  // The nastiest version of the same bug: `.*` used to match every key, so a
+  // config dump asked to mask one extra key came back with nothing readable.
+  const r = run(['--env', 'SESSION=abc', '--env', 'PORT=8080', '--redact-keys', '.*']);
+  assert.strictEqual(r.code, EXIT.OK);
+  const o = JSON.parse(r.out);
+  assert.strictEqual(o.PORT, '8080');
+  assert.strictEqual(o.SESSION, 'abc');
+});
+
+test('--redact-keys= with an empty value is a usage error', () => {
+  assert.throws(() => parseArgs(['--redact-keys=']), /--redact-keys requires a value/);
+});
+
 test('-- ends flag parsing so dotfiles can be passed', () => {
   const o = parseArgs(['--', '--weird-file.env']);
   assert.deepStrictEqual(o.files, ['--weird-file.env']);
