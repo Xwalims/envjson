@@ -10,7 +10,7 @@ node bin/envjson.js .env
 
 <!-- hero -->
 
-[![CI](https://github.com/envjson/actions/workflows/ci.yml/badge.svg)](https://github.com/envjson/actions/workflows/ci.yml)
+[![CI](https://github.com/Xwalims/envjson/actions/workflows/ci.yml/badge.svg)](https://github.com/Xwalims/envjson/actions/workflows/ci.yml)
 ![node 20+](https://img.shields.io/badge/node-20+-brightgreen)
 ![MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![dependencies](https://img.shields.io/badge/dependencies-none-2f6f4f)
@@ -35,8 +35,11 @@ every rule it follows and tests each one.
 
 ## Install
 
+Not published to npm — that name belongs to an unrelated dotenv tool. Clone and
+run it directly:
+
 ```bash
-git clone <this repo> && cd envjson
+git clone https://github.com/Xwalims/envjson.git && cd envjson
 node bin/envjson.js --help
 ```
 
