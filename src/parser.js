@@ -96,19 +96,6 @@ function scanQuoted(src, start) {
   return { value: out, end: i, closed: false };
 }
 
-/** Index of the `}` matching the `{` at `open`, honouring nesting. */
-function findClosingBrace(src, open) {
-  let depth = 0;
-  for (let i = open; i < src.length; i += 1) {
-    if (src[i] === '{') depth += 1;
-    else if (src[i] === '}') {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
 /**
  * Parse env/ini/properties text into an ordered entry list.
  *
