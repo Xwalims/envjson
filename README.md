@@ -360,6 +360,37 @@ port = 8080
 becomes `server.host` and `server.port`. Pass `format: 'properties'` (or a
 `.properties` filename) to keep dots in the key name instead.
 
+### `.properties` is read as java.util.Properties reads it
+
+The properties dialect follows `java.util.Properties`, because that is what
+most `.properties` files in the wild actually mean. The behaviours that
+surprise people, all checked against the JDK source:
+
+| Input                  | Result                        | Why                                  |
+| ---------------------- | ----------------------------- | ------------------------------------ |
+| `a:b=c`                | `a` → `b=c`                   | `:` is a separator too               |
+| `KEY value`            | `KEY` → `value`               | whitespace is a separator, not a "bare key" |
+| `KEY`                  | `KEY` → ``                    | nothing follows the key              |
+| `=v`                   | `` (empty key) → `v`          | an empty key is legal                |
+| `# c`, `! c`           | comment                       | `;` is **data**, not a comment       |
+| `ü\tv`                 | `ü` → `v`                     | tab separates, like a space          |
+
+Escapes are decoded on read (`\\ \t \n \r \f \uXXXX`, and any other `\c`
+stands for `c`), and a line ending in an odd number of backslashes continues
+onto the next. Only space, tab and form feed count as leading whitespace, so
+an NBSP or U+3000 in the first column is part of the key rather than
+indentation — a UTF-8 BOM is still stripped, as it is in every format.
+
+On write the escape rules are `saveConvert`'s: `\uXXXX` for anything outside
+`0x20..0x7E`, and because a Java `String` is UTF-16, an astral character such
+as `𐀀` becomes a surrogate **pair** (`\uD800\uDC00`). Every space in a *key* is
+escaped; in a *value* only a leading one. So `envjson` reads back exactly what
+it writes, including keys with spaces, `=`, `#` and `;` in them.
+
+One deliberate divergence: Java throws `IllegalArgumentException` on a
+malformed `\uXXXX`. envjson leaves the text alone instead, so a malformed
+escape is data rather than a crash.
+
 ## Keys named `__proto__`
 
 A `.env` file may legitimately define a variable called `__proto__`, and envjson

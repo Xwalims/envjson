@@ -8,6 +8,7 @@ const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
 const { main, parseArgs, format, formatProperties, EXIT } = require('../src/cli.js');
+const { parse, toObject } = require('../src/parser.js');
 const { DEFAULTS } = require('../src/defaults.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -176,6 +177,85 @@ test('ini output groups dotted keys into sections', () => {
 test('ini output escapes a # inside a value so it round-trips', () => {
   const text = format({ COLOR: '#ff8800' }, 'ini');
   assert.strictEqual(text, 'COLOR = "#ff8800"\n');
+});
+
+// --- output round-trips through the project's own parser ----------------
+// The two writers below used to emit text the reader could not read back:
+// `ini` left a value that opened with a quote unquoted, and `properties`
+// escaped in the java.util.Properties dialect that the reader did not
+// understand. Both claims were checked against java.util.Properties itself.
+
+const ROUND_TRIP_VALUES = [
+  '',
+  ' ',
+  '  ',
+  '\t',
+  'a',
+  'a b',
+  ' a',
+  'a ',
+  '\ta',
+  'a\t',
+  '#',
+  'a#b',
+  'a #b',
+  '#a',
+  ';',
+  'a;b',
+  'a ;b',
+  '=',
+  'a=b',
+  ':',
+  'a:b',
+  '!',
+  'a!b',
+  '\\',
+  'a\\b',
+  'a\\=b',
+  'a\\nb',
+  'a\nb',
+  'a\rb',
+  'a\fb',
+  '"',
+  '"a',
+  "'",
+  "'a",
+  'a"b',
+  "a'b",
+  'ä',
+  'a b',
+];
+
+test('ini output round-trips every awkward value back through the parser', () => {
+  for (const v of ROUND_TRIP_VALUES) {
+    const text = format({ K: v }, 'ini');
+    const back = toObject(parse(text, { format: 'ini', filename: 'x.ini' })).K;
+    assert.strictEqual(back, v, `ini round trip failed for ${JSON.stringify(v)} via ${JSON.stringify(text)}`);
+  }
+});
+
+test('properties output round-trips every awkward value back through the parser', () => {
+  for (const v of ROUND_TRIP_VALUES) {
+    const text = format({ K: v }, 'properties');
+    const back = toObject(parse(text, { format: 'properties', filename: 'x.properties' })).K;
+    assert.strictEqual(
+      back,
+      v,
+      `properties round trip failed for ${JSON.stringify(v)} via ${JSON.stringify(text)}`
+    );
+  }
+});
+
+test('a .properties key containing a space survives the trip', () => {
+  // The key must escape EVERY space, not just a leading one: load0 treats the
+  // first unescaped space as the key/value separator.
+  const obj = {};
+  obj['a b'] = 'v';
+  obj['a=b'] = 'w';
+  const text = formatProperties(obj);
+  const back = toObject(parse(text, { format: 'properties', filename: 'x.properties' }));
+  assert.strictEqual(back['a b'], 'v');
+  assert.strictEqual(back['a=b'], 'w');
 });
 
 // --- in-process CLI behaviour ---------------------------------------------

@@ -197,12 +197,45 @@ function format(object, formatName) {
   }
 }
 
-/** ini output is round-trippable: quote anything containing a `#`, `;` or newline. */
+/**
+ * Does an ini value have to be quoted to survive a trip through the parser?
+ *
+ * The parser trims an unquoted value, treats whitespace-then-`#`/`;` as a
+ * comment, and reads a value that OPENS with a quote as a quoted string. A
+ * value containing a newline is fine quoted, because a quoted value may span
+ * physical lines.
+ */
+function iniNeedsQuote(str) {
+  return (
+    /[#;\r\n]/.test(str) ||      // comment chars, or the value runs past EOL
+    /^\s|\s$/.test(str) ||       // unquoted values are trimmed
+    str[0] === '"' ||           // would open a quoted string ...
+    str[0] === "'" // ... that never closes
+  );
+}
+
+/**
+ * ini output is round-trippable: anything the parser would read back
+ * differently gets quoted.
+ *
+ * Inside the quotes the parser understands exactly five escapes -- `\\ \n \t
+ * \r \"` -- so those are the only ones emitted, and every literal backslash is
+ * doubled first. `\r` matters: the parser normalises CR to LF before scanning,
+ * so a raw CR in a quoted value would come back as a newline.
+ */
 function iniEscape(value) {
   const str = String(value);
   if (str === '') return '""';
-  if (/[#;\r\n]/.test(str) || /^[ \t]|[ \t]$/.test(str)) {
-    return `"${str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
+  if (iniNeedsQuote(str)) {
+    return (
+      '"' +
+      str
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r') +
+      '"'
+    );
   }
   return str;
 }
@@ -232,24 +265,78 @@ function formatIni(object, _withSections) {
   return out;
 }
 
+/**
+ * Serialize a value as a `.properties` value.
+ *
+ * A literal transcription of java.util.Properties#saveConvert with
+ * escapeSpace=false, which is exactly what Properties.store passes for
+ * VALUES: `\\ \t \n \r \f`, `\# \= \! \:` so a separator or comment character
+ * stays literal, and `\uXXXX` for anything outside 0x20..0x7E.
+ *
+ * Plain spaces are NOT escaped. Properties trims whitespace only around the
+ * separator, so an embedded space survives a round trip untouched -- and only
+ * a space in FIRST or LAST position needs the `\ ` treatment, because that is
+ * the position load0 strips. Escaping more would still read back correctly but
+ * would stop matching what every Java tool actually writes.
+ */
 function propertiesEscape(value) {
   const str = String(value);
   if (str === '') return '';
-  if (/[#!:\\=\s]/.test(str) || /^[ \t]|[ \t]$/.test(str) || /^[\s]/.test(str)) {
-    return str
-      .replace(/\\/g, '\\\\')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\t/g, '\\t')
-      .replace(/([#!:=])/g, '\\$1');
+  let out = '';
+  for (let i = 0; i < str.length; i += 1) {
+    const ch = str[i];
+    if (ch === ' ') {
+      // escapeSpace=false: ONLY a leading space is escaped. A trailing one
+      // needs nothing, because load0 strips whitespace only *around the
+      // separator* -- the end of the line is part of the value.
+      if (i === 0) out += '\\';
+      out += ' ';
+      continue;
+    }
+    if (ch === '\\') { out += '\\\\'; continue; }
+    if (ch === '\t') { out += '\\t'; continue; }
+    if (ch === '\n') { out += '\\n'; continue; }
+    if (ch === '\r') { out += '\\r'; continue; }
+    if (ch === '\f') { out += '\\f'; continue; }
+    if (ch === '=' || ch === ':' || ch === '#' || ch === '!') {
+      out += '\\';
+      out += ch;
+      continue;
+    }
+    // saveConvert's fast path: anything printable between '>' (0x3E) and
+    // '~' goes out verbatim, backslash included on its own branch.
+    if (ch > '>' && ch < '~' && ch !== '\\') {
+      out += ch;
+      continue;
+    }
+    if (ch < ' ' || ch > '~') {
+      out += '\\u' + ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0');
+      continue;
+    }
+    out += ch;
   }
-  return str;
+  return out;
+}
+
+/**
+ * Serialize a `.properties` KEY: saveConvert with escapeSpace=true, so EVERY
+ * space is escaped. That is what load0 needs in order not to treat the space
+ * as the key/value separator.
+ */
+function propertiesEscapeKey(key) {
+  const str = String(key);
+  let out = '';
+  for (let i = 0; i < str.length; i += 1) {
+    if (str[i] === ' ') { out += '\\ '; continue; }
+    out += propertiesEscape(str[i]);
+  }
+  return out;
 }
 
 function formatProperties(object) {
   let out = '';
   for (const [key, value] of Object.entries(object)) {
-    out += `${key}=${propertiesEscape(value)}\n`;
+    out += `${propertiesEscapeKey(key)}=${propertiesEscape(value)}\n`;
   }
   return out;
 }
