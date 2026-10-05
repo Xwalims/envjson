@@ -208,11 +208,15 @@ function expandTemplates(object, templates, options = {}) {
   const maxPasses = options.maxPasses || MAX_DEPTH;
   let current = copyOwn(object);
   let errors = [];
-  const seenErrors = new Set();
 
   for (let pass = 0; pass < maxPasses; pass += 1) {
     const base = makeLookup(current, useProcessEnv);
     const next = {};
+    // Rebuilt per pass, and that is deliberate: the caller wants the failures
+    // that are STILL failing, not every failure ever seen. A key whose
+    // dependency only arrives in a later pass (a forward reference) stops
+    // failing and must stop being reported, so the previous pass's list is
+    // discarded rather than accumulated into.
     errors = [];
     let changed = false;
 
@@ -233,10 +237,21 @@ function expandTemplates(object, templates, options = {}) {
         if (expanded !== value) changed = true;
         assignKey(next, key, expanded);
       } catch (err) {
-        if (!seenErrors.has(key)) {
-          seenErrors.add(key);
-          errors.push({ key, message: err.message });
-        }
+        // No cross-pass dedup here. `errors` is per-pass, so this branch sees
+        // each key exactly once per pass and the push cannot duplicate -- but a
+        // `seenErrors` set that outlived the pass did exactly that. It recorded
+        // a key on the pass where it first failed and then suppressed every
+        // later re-report, so a key that failed on EVERY pass was reported
+        // exactly once, on the first one, and the list handed back at the end
+        // was the last pass's -- which is empty for any key that failed again
+        // in it. Combined with the per-pass reset that made `errors` come back
+        // empty for any document that both expanded something AND had a
+        // failing key, which is the overwhelmingly common shape: one
+        // `${VAR:?msg}` guard plus any reference anywhere in the file.
+        //
+        // `errors` is the only signal a caller has that a required-variable
+        // guard fired, and failing the run is the entire purpose of that guard.
+        errors.push({ key, message: err.message });
         assignKey(next, key, value);
       }
     }

@@ -168,6 +168,55 @@ test('expandObject collects per-key errors instead of aborting the batch', () =>
   assert.match(errors[0].message, /boom/);
 });
 
+// The error list used to be whatever the LAST pass happened to produce, and the
+// pass loop stops as soon as a pass changes nothing. A forward reference makes
+// pass 1 change something, so pass 2 runs -- and pass 2 fails on exactly the
+// same keys pass 1 failed on, for exactly the same reason, because their value
+// was rolled back and retried. So the final pass DOES record the error and the
+// list comes out empty. Every error was raised, reported, and then dropped on
+// the floor one pass later.
+//
+// It is worse than a lost list. `errors` is the only signal a caller has that a
+// `${VAR:?msg}` guard fired, and the guard's entire purpose is to fail the run.
+// A caller that checks `errors.length` before deploying config gets `0` and
+// ships a config where `DB_PASSWORD` was silently left as the literal string
+// `${DB_PASSWORD:?required}`. The CLI is unaffected -- merge() resolves in a
+// single pass -- so this reached library callers only.
+
+test('a failing key is still reported after a later pass resolves a forward reference', () => {
+  const { object, errors } = expandObject(
+    { A: '${B}', B: 'v', BAD: '${NOPE:?boom}' },
+    { useProcessEnv: false }
+  );
+  assert.strictEqual(object.A, 'v', 'the forward reference did resolve');
+  assert.strictEqual(errors.length, 1, 'and the failure did not get lost');
+  assert.strictEqual(errors[0].key, 'BAD');
+  assert.match(errors[0].message, /boom/);
+});
+
+test('every failing key survives the extra passes, in file order', () => {
+  const { errors } = expandObject(
+    { BAD1: '${N1:?b1}', BAD2: '${N2:?b2}', X: '${LATER}', LATER: 'v' },
+    { useProcessEnv: false }
+  );
+  assert.deepStrictEqual(
+    errors.map((e) => e.key),
+    ['BAD1', 'BAD2']
+  );
+});
+
+// A key that stops failing -- its dependency arrives in a later pass -- must
+// stop being reported, or a legitimate forward reference would be held
+// against the caller forever.
+test('a key that resolves once its dependency arrives is not reported', () => {
+  const { object, errors } = expandObject(
+    { A: '${B}', B: '${C}', C: 'finally' },
+    { useProcessEnv: false }
+  );
+  assert.strictEqual(object.A, 'finally');
+  assert.deepStrictEqual(errors, []);
+});
+
 test('expansion can fall back to process.env', () => {
   process.env.ENVJSON_TEST_VALUE = 'from-process';
   try {
