@@ -487,14 +487,40 @@ node --test
 ```
 
 ```
-ℹ tests 186
+ℹ tests 218
 ℹ suites 0
-ℹ pass 186
+ℹ pass 218
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
 ```
+
+### Differential check against bash
+
+Every expectation above comes from this project's own code, which certifies
+self-consistency rather than correctness. The expansions documented in this file
+are claims about what a shell does, so the harness in `scripts/` checks them
+against `/bin/bash` itself: the same template, in the same environment state,
+through both. It is a development tool, needs no network, and is deliberately not
+part of the suite — bash is not a dependency of this package.
+
+```bash
+npm run cross-check                          # 3000 cases, fixed seed
+node scripts/cross-check-bash.js --trials 300 --seed 4242
+```
+
+```
+oracle: /bin/bash
+3000 cases compared (seed=20261005), 0 mismatch(es)
+
+expansion agrees with bash on every comparable case
+```
+
+It exits non-zero and prints the offending template, environment and both results
+on any disagreement. Two deliberate exclusions: the `:?` and `?` operators abort
+the shell rather than printing, so `node --test` owns them; and a value *in the
+file* is a template by design, so there is no bash equivalent to compare against.
 
 ## License
 
