@@ -104,7 +104,14 @@ function findClosingBrace(text, open) {
 }
 
 function resolveRef(ref, lookup, chain, maxDepth, options) {
-  const raw = lookup(ref.name);
+  const found = lookup(ref.name);
+  // A Verbatim wrapper means the value came from process.env and is data, not a
+  // template. It is unwrapped HERE, at the boundary, so every branch below sees
+  // an ordinary string: `isEmpty` must test the real text (an exported empty
+  // value has to count as empty for `:-` and `:?` to fire) and no operator form
+  // has to know the wrapper exists.
+  const verbatim = found instanceof Verbatim;
+  const raw = verbatim ? found.text : found;
   const isSet = raw !== undefined && raw !== null;
   const isEmpty = isSet && raw === '';
 
@@ -150,11 +157,25 @@ function resolveRef(ref, lookup, chain, maxDepth, options) {
 
   if (typeof chosen !== 'string' || chosen === '') return '';
 
+  // A value that arrived verbatim from process.env is substituted and STOPPED.
+  // This is the second half of the fix documented in makeLookup: bash expands a
+  // reference and prints the result, it never runs that result back through
+  // expansion.
+  //
+  // The branch that chose `chosen` is what decides, NOT whether the text happens
+  // to equal the variable's own value. Comparing the two looks equivalent and is
+  // not: with `P='$HOME'` exported, `${P+$HOME}` takes the `+` branch and picks
+  // the WORD `$HOME`, which bash expands to a home directory. A text comparison
+  // would see `chosen === raw`, conclude "this is P's value", and return the
+  // literal `$HOME` instead. `fromArgument` records the actual branch, so that
+  // case expands and a genuine value does not.
   if (fromArgument) {
     // The default text is a template and may itself contain references. It is
     // NEVER the variable's own value, so no cycle is possible here.
     return expandString(chosen, lookup, chain, maxDepth, options);
   }
+
+  if (verbatim) return raw;
 
   // The value came from the variable. Re-expand it, guarding against a chain
   // that loops back to this name.
@@ -168,13 +189,70 @@ function resolveRef(ref, lookup, chain, maxDepth, options) {
 
 /**
  * Build the lookup used by `expand` from an object, optionally + process.env.
+ *
+ * VALUES FROM process.env ARE NOT TEMPLATES.
+ *
+ * The lookup distinguishes the two sources, and the distinction is load-bearing.
+ * A value read from the document is itself a template, so re-expanding it is what
+ * makes `A=${B}` / `B=${C}` resolve in any order -- deliberate, and documented. A
+ * value read from process.env is NOT a template: it is data that happened to be
+ * exported, and the shell never re-scans it.
+ *
+ *     export P='p$ssw0rd'
+ *     printf %s "$P"          # bash prints: p$ssw0rd
+ *
+ * bash expands a REFERENCE and prints the result. It does not take that result
+ * and run it through expansion a second time, so a literal `$` in a secret
+ * survives. The old lookup returned the raw string and let the caller's
+ * recursion re-expand it, which silently ate the `$`: `P='p$ssw0rd'` resolved to
+ * `p`, because `$ssw0rd` was then read as a reference to an unset variable.
+ * `${X}` in an exported value resolved to nothing, and `x$$y` became `x$y` --
+ * the second `$` was parsed as the start of a reference. That value is a
+ * plausible password or a token in an AWS secret, so this is data corruption on
+ * the credential path, not a cosmetic diff.
+ *
+ * An environment value is therefore wrapped in {@link Verbatim}. It is still
+ * substituted as a STRING -- `P='a:b'` in `U=${P}` yields `a:b`, not a parsed
+ * object -- but its own `$` sequences are inert.
+ *
+ * A wrapper object rather than a property on the string itself: a primitive
+ * string cannot carry a brand, since `Object.defineProperty` on one throws
+ * `TypeError: Object.defineProperty called on non-object` in both strict and
+ * sloppy mode. Boxing the value into a String would work but then `typeof`
+ * changes to `object`, which every `typeof chosen !== 'string'` guard in this
+ * file would then reject.
+ *
+ * The wrapper is built here, at the single point every lookup flows through,
+ * rather than at each call site: `expandTemplates`, `merge` and any future caller
+ * all share it, so none of them can reintroduce the bug.
+ *
+ * @param {object} source Own data map treated as templates.
+ * @param {boolean} useProcessEnv Whether unset names may fall through to
+ *   `process.env`.
+ * @returns {(name: string) => (string|Verbatim|undefined)}
  */
 function makeLookup(source, useProcessEnv) {
   return function lookup(name) {
     if (hasKey(source, name)) return source[name];
-    if (useProcessEnv && process.env && process.env[name] !== undefined) return process.env[name];
+    if (useProcessEnv && process.env && process.env[name] !== undefined) {
+      return new Verbatim(String(process.env[name]));
+    }
     return undefined;
   };
+}
+
+/**
+ * A substituted value that must never be scanned as a template.
+ *
+ * The class is the brand, so the test is an `instanceof` rather than a guess
+ * about the text. A value cannot fake its way past this, and a genuine template
+ * whose text happens to contain a reference is still expanded.
+ */
+class Verbatim {
+  /** @param {string} text Raw value that is data, not a template. */
+  constructor(text) {
+    this.text = text;
+  }
 }
 
 /** Does this template mention the key it is being expanded for? */

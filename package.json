@@ -13,7 +13,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "cross-check": "node scripts/cross-check-bash.js"
   },
   "keywords": [
     "dotenv",

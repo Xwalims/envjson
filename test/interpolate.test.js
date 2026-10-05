@@ -228,6 +228,131 @@ test('expansion can fall back to process.env', () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// process.env values are DATA, not templates.
+//
+// bash expands a reference and prints the result. It never runs that result back
+// through expansion, so a literal `$` in an exported value survives:
+//
+//     export P='p$ssw0rd'
+//     printf %s "$P"          # p$ssw0rd
+//
+// Every expectation below was read off bash, and each one produced something
+// else here: the value was handed back from the lookup as an ordinary string and
+// the caller recursed into it, so `$ssw0rd` was read as a reference to an unset
+// variable and `p$ssw0rd` came out as `p`. That is silent corruption of a
+// credential on the exact path this tool exists to resolve.
+// ---------------------------------------------------------------------------
+
+const VERBATIM_ENV = 'ENVJSON_VERBATIM_TEST';
+const verbatim = (value, template, run) => {
+  process.env[VERBATIM_ENV] = value;
+  try {
+    return run(template);
+  } finally {
+    delete process.env[VERBATIM_ENV];
+  }
+};
+
+test('an exported value keeps its literal dollar instead of being re-expanded', () => {
+  // bash: P='p$ssw0rd'; printf %s "$P"  ->  p$ssw0rd
+  assert.strictEqual(
+    verbatim('p$ssw0rd', '$ENVJSON_VERBATIM_TEST', (t) =>
+      expandObject({ X: t }, { useProcessEnv: true }).object.X),
+    'p$ssw0rd',
+  );
+});
+
+test('every dollar shape survives an exported value unchanged', () => {
+  // These are the shapes a real password, ARN or token can take. Each one used to
+  // lose part of itself: `$HOME` expanded to a home directory, `${X}` vanished,
+  // `x$$y` lost a `$` because the second one started a bogus reference.
+  for (const value of ['$HOME', '${X}', 'x$$y', 'a$b', '$', 'a$', 'k$', '$PATH-x', 'a$b$c']) {
+    const object = verbatim(
+      value,
+      '$ENVJSON_VERBATIM_TEST',
+      (t) => expandObject({ X: t }, { useProcessEnv: true }).object.X,
+    );
+    assert.strictEqual(object, value, `${JSON.stringify(value)} must not be re-scanned`);
+  }
+});
+
+test('an exported value is substituted in the middle of a template', () => {
+  assert.strictEqual(
+    verbatim('a$b', 'pre${ENVJSON_VERBATIM_TEST}post', (t) =>
+      expandObject({ X: t }, { useProcessEnv: true }).object.X),
+    'prea$bpost',
+  );
+});
+
+test('a DOCUMENT value is still a template, and that difference is deliberate', () => {
+  // The document side is unchanged: a value in the file IS a template, which is
+  // what makes `A=${B}` / `B=${C}` resolve in any order. Only the environment
+  // side is inert. Pinning both halves stops a "fix" that makes one side behave
+  // like the other.
+  const { object } = expandObject(
+    { SRC: 'p$ssw0rd', OUT: '$SRC' },
+    { useProcessEnv: false },
+  );
+  assert.strictEqual(object.SRC, 'p');
+  assert.strictEqual(object.OUT, 'p');
+});
+
+test('the WORD in a + family form is still expanded, even when it equals the exported text', () => {
+  // bash: P='$HOME'; printf %s "${P+$HOME}"  ->  the HOME DIRECTORY.
+  // This is the case a naive "is the chosen text the same as the variable's
+  // value" check gets wrong: the two strings are identical here, but one is the
+  // WORD and must be expanded while the other is a value and must not be.
+  const home = process.env.HOME || '/root';
+  assert.strictEqual(
+    verbatim('$HOME', '${ENVJSON_VERBATIM_TEST+$HOME}', (t) =>
+      expandObject({ X: t }, { useProcessEnv: true }).object.X),
+    home,
+  );
+});
+
+test('an exported empty value still counts as empty for :- and :?', () => {
+  assert.strictEqual(
+    verbatim('', '${ENVJSON_VERBATIM_TEST:-fallback}', (t) =>
+      expandObject({ X: t }, { useProcessEnv: true }).object.X),
+    'fallback',
+  );
+  const { errors, object } = verbatim('', '${ENVJSON_VERBATIM_TEST:?required}', (t) =>
+    expandObject({ X: t }, { useProcessEnv: true }));
+  assert.strictEqual(errors.length, 1, 'an empty exported value must trip the guard');
+  assert.match(errors[0].message, /required/);
+  assert.strictEqual(object.X, '${ENVJSON_VERBATIM_TEST:?required}');
+});
+
+test('an unset name still falls through to the environment unchanged', () => {
+  process.env.ENVJSON_VERBATIM_TEST = 'plain-value';
+  try {
+    const { object } = expandObject({ X: '$ENVJSON_VERBATIM_TEST' }, { useProcessEnv: true });
+    assert.strictEqual(object.X, 'plain-value');
+  } finally {
+    delete process.env.ENVJSON_VERBATIM_TEST;
+  }
+});
+
+test('merge() -- the path the CLI actually uses -- keeps the value verbatim', () => {
+  // The CLI calls merge(), not expandObject(), so a fix that only covered the
+  // library export would leave the shipped binary wrong. Checked through a real
+  // .env source, not a hand-built object.
+  const { mergeSources } = require('../src/merge.js');
+  process.env.ENVJSON_VERBATIM_TEST = 'p$ssw0rd';
+  try {
+    const result = mergeSources(
+      [{ name: 'app.env', text: 'OUT=$ENVJSON_VERBATIM_TEST\nTPL=${ENVJSON_VERBATIM_TEST}/x\n' }],
+      {},
+    );
+    assert.deepStrictEqual(result.errors, []);
+    assert.strictEqual(result.object.OUT, 'p$ssw0rd');
+    assert.strictEqual(result.object.TPL, 'p$ssw0rd/x');
+  } finally {
+    delete process.env.ENVJSON_VERBATIM_TEST;
+  }
+});
+
 test('parseReference recognizes each supported form', () => {
   assert.deepStrictEqual(parseReference('$A', 0), { name: 'A', operator: null, argument: '', end: 2 });
   assert.strictEqual(parseReference('${A}', 0).name, 'A');

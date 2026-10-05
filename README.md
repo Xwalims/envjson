@@ -191,6 +191,24 @@ knowing: an **empty** word after `-` or `?` yields the variable itself, so
 `${PORT-}` is `8080`, while an empty word after `+` yields the empty string, so
 `${PORT+}` is `""`. `${PORT:+}` is `""` too.
 
+**A value from `process.env` is data, not a template.** bash expands a reference
+and prints the result; it never runs that result back through expansion. So a
+literal `$` in an exported variable survives:
+
+```sh
+export DB_PASSWORD='p$ssw0rd'
+printf %s "$DB_PASSWORD"     # p$ssw0rd
+```
+
+A value *in the file* is a template — that is what makes `A=${B}` / `B=${C}` resolve
+in any order — and it is re-expanded. A value from the environment is not. Getting
+this backwards silently truncated any secret containing a `$`: `p$ssw0rd` came out
+as `p`, because `$ssw0rd` was read as a reference to an unset variable, and a
+`${X}` in an exported value vanished entirely.
+
+This is checked against `/bin/bash` itself over randomly generated templates and
+environment states, not against this project's own expectations.
+
 **Self-references terminate.** A template that names the key it defines reads
 that key's *previous* value, exactly like a shell assignment. `PORT=${PORT:-3000}`
 over an inherited `PORT=8080` gives `8080`; over nothing it gives `3000`. There
