@@ -97,7 +97,14 @@ const STATES = [
 
 // Words used as default/alternate arguments. No shell metacharacters, so the
 // comparison is about expansion semantics and not about quoting.
-const WORDS = ['def', 'fallback', 'x', '', 'a b', '0'];
+//
+// The whitespace-only words are NOT decoration. `WORDS` used to hold '' and
+// never ' ', which is why the trailing-whitespace strip in the reference parser
+// went unnoticed for so long: the oracle never generated a word that could
+// reveal it, and the in-repo suite asserts against the parser's own output.
+// Trailing/leading whitespace in a word is legal POSIX and bash honours it, so
+// these belong here.
+const WORDS = ['def', 'fallback', 'x', '', ' ', '  ', 'a b', 'a ', ' a', '0'];
 
 function genTemplate() {
   let out = '';

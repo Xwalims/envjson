@@ -121,6 +121,76 @@ test('parseReference recognizes the + forms', () => {
   assert.strictEqual(parseReference('${A-}', 0).operator, null);
 });
 
+// --- whitespace inside the word ----------------------------------------
+//
+// The word is literal text, so its whitespace is data. Every expectation here
+// was read off /bin/bash 5.2 through scripts/cross-check-bash.js's oracle path
+// and re-confirmed without that harness's own escaping, because the harness
+// escapes backslashes on the way in.
+//
+// The bug: the reference regex ended in `([\s\S]*?)\s*$`, a non-greedy word
+// followed by a trailing-whitespace strip. That stripped whitespace from the
+// END OF THE WORD, so `${A:-a }` expanded to `a` and `${A:- }` expanded to
+// nothing at all -- a one-space default silently vanished from the value.
+// Leading whitespace was never affected (`${A:- a}` was always " a"), which is
+// why this hid for so long: the asymmetric half looked like the working half.
+
+test('a word keeps its trailing whitespace', () => {
+  assert.strictEqual(expand('${NOPE:-a }', look), 'a ');
+  assert.strictEqual(expand('${NOPE:-a  }', look), 'a  ');
+  assert.strictEqual(expand('x${NOPE:-a }y', look), 'xa y');
+});
+
+test('a whitespace-only word is whitespace, not nothing', () => {
+  // This is the sharpest form of the bug: the default was one space and the
+  // result was the empty string, so a caller could not distinguish "no default
+  // given" from "default was a single space".
+  assert.strictEqual(expand('${NOPE:- }', look), ' ');
+  assert.strictEqual(expand('${NOPE:-  }', look), '  ');
+  assert.strictEqual(expand('${NOPE- }', look), ' ');
+  // The - family applies its word only when the variable is UNSET. EMPTY is
+  // set, so the word does not apply and EMPTY's own (empty) value is used --
+  // read off bash, which prints nothing here. Asserted because it looks like
+  // the whitespace case and is not.
+  assert.strictEqual(expand('${EMPTY- }', look), '');
+  assert.strictEqual(expand('${EMPTY:- }', look), ' '); // the colon form does apply
+});
+
+test('a word keeps a trailing tab and a trailing newline', () => {
+  assert.strictEqual(expand('${NOPE:-a\t}', look), 'a\t');
+  assert.strictEqual(expand('${NOPE:-a\n}', look), 'a\n');
+  assert.strictEqual(expand('${NOPE:- \t }', look), ' \t ');
+  // Internal whitespace was always kept; these are the control cases.
+  assert.strictEqual(expand('${NOPE:-a\tb}', look), 'a\tb');
+  assert.strictEqual(expand('${NOPE:- a}', look), ' a');
+});
+
+test('the + family keeps trailing whitespace in its word too', () => {
+  assert.strictEqual(expand('${HOST:+ }', look), ' ');
+  assert.strictEqual(expand('${HOST+ }', look), ' ');
+  // Both are empty here, which is what a whitespace word must NOT change:
+  // ${HOST+ } still requires the variable to be set to take the word.
+  assert.strictEqual(expand('${EMPTY+ }', look), ' ');
+  assert.strictEqual(expand('${NOPE:+ }', look), '');
+});
+
+test('a whitespace word still counts as a word, not as a bare reference', () => {
+  // The empty-word demotion must key off a genuinely EMPTY word. `${A- }` has
+  // a word of one space, so it keeps its operator; if it were demoted to a
+  // bare `${A}` the result would be the variable's value instead of " ".
+  assert.strictEqual(parseReference('${A- }', 0).operator, '-');
+  assert.strictEqual(parseReference('${A:- }', 0).operator, ':-');
+  assert.strictEqual(parseReference('${A-}', 0).operator, null); // still demoted
+  assert.strictEqual(parseReference('${A:+ }', 0).operator, ':+');
+});
+
+test('parseReference keeps the word verbatim', () => {
+  assert.strictEqual(parseReference('${A:-a }', 0).argument, 'a ');
+  assert.strictEqual(parseReference('${A:- }', 0).argument, ' ');
+  assert.strictEqual(parseReference('${A:-a}', 0).argument, 'a');
+  assert.strictEqual(parseReference('${A:-}', 0).argument, '');
+});
+
 test('a key defined by a + template reads its previous value, not itself', () => {
   // Nothing inherited, so the word never applies and the result is empty --
   // the same thing the shell does for `A=${A:+inner}` with no prior A. The

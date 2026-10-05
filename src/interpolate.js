@@ -64,7 +64,16 @@ function parseReference(text, at) {
     const close = findClosingBrace(text, at + 1);
     if (close === -1) return null;
     const inner = text.slice(at + 2, close);
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(:?[-?+])?([\s\S]*?)\s*$/.exec(inner);
+    // The word is everything after the operator, verbatim to the closing brace.
+    // There is deliberately NO trailing `\s*$` here: bash treats the word as
+    // literal text, so `${A:-a }` is the two-character string `a ` and
+    // `${A:- }` is a single space. A trailing-whitespace strip made both
+    // collapse to `a` and to nothing respectively, which is visible in ordinary
+    // output -- a default of one space silently vanished from the value.
+    // Leading whitespace before the NAME is still tolerated (see `\s*` below),
+    // which is a deliberate leniency: bash rejects `${ A }` outright, and the
+    // generator harness cannot compare a form bash refuses to expand.
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(:?[-?+])?([\s\S]*)$/.exec(inner);
     if (!m) return null;
     const ref = {
       name: m[1],

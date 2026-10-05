@@ -191,6 +191,35 @@ knowing: an **empty** word after `-` or `?` yields the variable itself, so
 `${PORT-}` is `8080`, while an empty word after `+` yields the empty string, so
 `${PORT+}` is `""`. `${PORT:+}` is `""` too.
 
+**Whitespace in a word is data.** A word is literal text, so a space anywhere in
+it is kept — at the front, at the end, or on its own. Given a file of
+
+```sh
+A=${MISSING:- }
+B=${MISSING:-one }
+C=${MISSING:-a  b }
+D=x${MISSING:- }y
+```
+
+`envjson` prints
+
+```json
+{
+  "A": " ",
+  "B": "one ",
+  "C": "a  b ",
+  "D": "x y"
+}
+```
+
+(verified with `cat -A`, where a trailing space shows as ` $` before the line
+end). A one-space default is a one-space value, not an empty one: before this
+was fixed the parser stripped whitespace off the end of a word, so `"A"` came
+out as `""` and `"B"` as `"one"`. Note that only the *trailing* end was ever
+affected — `${MISSING:- one }` kept its leading space all along, which is
+exactly why the bug survived: the half that looked broken was the half nobody
+wrote.
+
 **A value from `process.env` is data, not a template.** bash expands a reference
 and prints the result; it never runs that result back through expansion. So a
 literal `$` in an exported variable survives:
