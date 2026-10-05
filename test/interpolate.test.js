@@ -59,6 +59,76 @@ test('\\$ escapes a literal dollar sign', () => {
   assert.strictEqual(expand('\\${HOST}', look), '${HOST}');
 });
 
+// --- ${VAR:+word} and ${VAR+word} ---------------------------------------
+//
+// Every expectation below was read off /bin/bash 5.2 and confirmed on
+// /bin/dash, which agrees case for case. The `+` family is POSIX parameter
+// expansion; before it was implemented the operator did not parse at all, so
+// the reference fell through to the plain "yield the variable" branch and
+// `${HOST:+localhost}` silently produced HOST's own value.
+
+test('${VAR:+word} yields the word only when the variable is set and non-empty', () => {
+  assert.strictEqual(expand('${HOST:+localhost}', look), 'localhost');
+  assert.strictEqual(expand('${EMPTY:+fallback}', look), '');
+  assert.strictEqual(expand('${NOPE:+fallback}', look), '');
+});
+
+test('${VAR+word} yields the word whenever the variable is set, empty included', () => {
+  assert.strictEqual(expand('${HOST+localhost}', look), 'localhost');
+  assert.strictEqual(expand('${EMPTY+fallback}', look), 'fallback');
+  assert.strictEqual(expand('${NOPE+fallback}', look), '');
+});
+
+test('an empty word after + means empty, NOT the variable value', () => {
+  // This is the asymmetry with ${VAR-}, whose empty word yields the variable.
+  // bash: ${A-} and ${A:-} are "alpha"; ${A+} and ${A:+} are both "". Treating
+  // an empty + word as "no operator" is what made ${A+} return "alpha".
+  assert.strictEqual(expand('${HOST+}', look), '');
+  assert.strictEqual(expand('${HOST:+}', look), '');
+  assert.strictEqual(expand('${EMPTY+}', look), '');
+  assert.strictEqual(expand('${NOPE:+}', look), '');
+});
+
+test('the + word is itself a template', () => {
+  assert.strictEqual(expand('${HOST:+pre-$PORT-post}', look), 'pre-5432-post');
+  assert.strictEqual(expand('${HOST:+${NOPE:-fallback}}', look), 'fallback');
+  // `${HOST+:+$PORT}` -- the `:+` inside is literal text of the word, not a
+  // nested operator, because the operator is consumed by the FIRST `:?[-?+]`
+  // match. bash 5.2 and dash both give ":+5432" here.
+  assert.strictEqual(expand('${HOST+:+$PORT}', look), ':+5432');
+  assert.strictEqual(expand('${HOST:+:$PORT}', look), ':5432');
+});
+
+test('a + word survives surrounding literal text', () => {
+  assert.strictEqual(expand('x${HOST:+y}z', look), 'xyz');
+  assert.strictEqual(expand('x${EMPTY:+y}z', look), 'xz');
+  assert.strictEqual(expand('${HOST:+d}-tail', look), 'd-tail');
+});
+
+test('nested + forms resolve innermost first', () => {
+  assert.strictEqual(expand('${NOPE:-${HOST:+w}}', look), 'w');
+  assert.strictEqual(expand('${HOST:+${HOST:+deep}}', look), 'deep');
+  assert.strictEqual(expand('${NOPE:+${NOPE:+deep}}', look), '');
+});
+
+test('parseReference recognizes the + forms', () => {
+  assert.strictEqual(parseReference('${A:+d}', 0).operator, ':+');
+  assert.strictEqual(parseReference('${A+d}', 0).operator, '+');
+  // An empty + word keeps its operator; it is NOT demoted to a bare reference.
+  assert.strictEqual(parseReference('${A:+}', 0).operator, ':+');
+  assert.strictEqual(parseReference('${A+}', 0).operator, '+');
+  // The - and ? families still demote, because that is the shell's behaviour.
+  assert.strictEqual(parseReference('${A-}', 0).operator, null);
+});
+
+test('a key defined by a + template reads its previous value, not itself', () => {
+  // Nothing inherited, so the word never applies and the result is empty --
+  // the same thing the shell does for `A=${A:+inner}` with no prior A. The
+  // important part is that it terminates and does not feed on itself.
+  const out = expandObject({ A: '${A:+inner}' }, { useProcessEnv: false }).object;
+  assert.strictEqual(out.A, '');
+});
+
 test('a bare $ not followed by a name stays literal', () => {
   assert.strictEqual(expand('100$ and $ done', look), '100$ and $ done');
 });

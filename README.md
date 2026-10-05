@@ -178,10 +178,18 @@ reported in `--stats`.
 | `${VAR-def}`    | `def` when unset (empty counts as set)          |
 | `${VAR:?msg}`   | error when unset **or empty**                   |
 | `${VAR?msg}`    | error when unset                                |
+| `${VAR:+word}`  | `word` when set **and non-empty**              |
+| `${VAR+word}`   | `word` when set (empty counts as set)           |
 | `\$`            | a literal dollar sign                           |
 
 Lookup order is: the merged object, then `process.env`. A reference resolves
 lazily, so it may point at a key defined further down the file.
+
+Every row of that table was read off `/bin/bash` and confirmed against
+`/bin/dash`, which agrees case for case. The `+` family has one asymmetry worth
+knowing: an **empty** word after `-` or `?` yields the variable itself, so
+`${PORT-}` is `8080`, while an empty word after `+` yields the empty string, so
+`${PORT+}` is `""`. `${PORT:+}` is `""` too.
 
 **Self-references terminate.** A template that names the key it defines reads
 that key's *previous* value, exactly like a shell assignment. `PORT=${PORT:-3000}`

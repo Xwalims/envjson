@@ -14,6 +14,8 @@ const { assignKey, hasKey, copyOwn } = require('./keysafe.js');
  *   ${VAR-def}    default when unset (empty counts as set)
  *   ${VAR:?msg}   error when unset OR empty
  *   ${VAR?msg}    error when unset
+ *   ${VAR:+word}  word when set AND non-empty, else nothing
+ *   ${VAR+word}   word when set (empty counts as set), else nothing
  *   \$            a literal dollar sign
  *
  * References resolve lazily against the accumulator built so far, so a value
@@ -62,7 +64,7 @@ function parseReference(text, at) {
     const close = findClosingBrace(text, at + 1);
     if (close === -1) return null;
     const inner = text.slice(at + 2, close);
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(:?[-?])?([\s\S]*?)\s*$/.exec(inner);
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(:?[-?+])?([\s\S]*?)\s*$/.exec(inner);
     if (!m) return null;
     const ref = {
       name: m[1],
@@ -72,6 +74,14 @@ function parseReference(text, at) {
     };
     if (ref.operator === '-' || ref.operator === '?') {
       // A `:-` / `:?` / `-` / `?` form needs an argument; `${A?}` stays plain.
+      //
+      // That fallback is exactly what the shell does for the EMPTY word: bash
+      // gives `${A-}` and `${A:-}` the variable's own value, which is what
+      // dropping the operator yields. The `+` family is deliberately NOT in
+      // this branch, because its empty word is meaningful and asymmetric --
+      // `${A+}` and `${A:+}` both expand to the empty string, while the plain
+      // `${A}` would expand to the value. Dropping the operator there would
+      // turn a request for "nothing" into a request for the variable.
       if (ref.argument === '') return { ...ref, operator: null };
     }
     return ref;
@@ -113,6 +123,25 @@ function resolveRef(ref, lookup, chain, maxDepth, options) {
   } else if (ref.operator === '-' && !isSet) {
     chosen = ref.argument;
     fromArgument = true;
+  } else if (ref.operator === ':+' && isSet && !isEmpty) {
+    // Alternate value: the WORD wins when the variable is set and non-empty.
+    //
+    // This is the mirror image of `:-`, and note what it does NOT fall
+    // through to. Before this branch existed, `+` parsed to no operator at
+    // all, so `${HOST:+localhost}` silently yielded HOST's own value -- the
+    // one form where "the variable is fine" and "use this other thing" are
+    // opposite outcomes, which makes the silent reading doubly wrong.
+    chosen = ref.argument;
+    fromArgument = true;
+  } else if (ref.operator === '+' && isSet) {
+    chosen = ref.argument;
+    fromArgument = true;
+  } else if (ref.operator === ':+' || ref.operator === '+') {
+    // The negative half of the `+` family: unset, or set-but-empty for `:+`.
+    // Both produce the empty string, never the variable's value. Falling
+    // through to `isSet` here is the bug; it is spelled out as its own branch
+    // so the asymmetry with `:-` is visible.
+    return '';
   } else if (isSet) {
     chosen = raw;
   } else {
@@ -150,8 +179,13 @@ function makeLookup(source, useProcessEnv) {
 
 /** Does this template mention the key it is being expanded for? */
 function referencesSelf(template, key) {
-  const names = String(template).match(/\$\{?\s*[A-Za-z_][A-Za-z0-9_]*\s*[:?-]?/g) || [];
-  return names.some((n) => n.replace(/^\$\{?\s*/, '').replace(/[:?-]\s*$/, '') === key);
+  // The operator class must include `+`, and it must include it the way the
+  // parser does -- `[:?+-]` with the `+` last so it is a literal. `${A:+d}`
+  // mentions A, and scoping A out is what stops `${A:+${A}}` from resolving
+  // against its own previous value.
+  const names =
+    String(template).match(/\$\{?\s*[A-Za-z_][A-Za-z0-9_]*\s*[:?+\-]?/g) || [];
+  return names.some((n) => n.replace(/^\$\{?\s*/, '').replace(/[:?+\-]\s*$/, '') === key);
 }
 
 /**
