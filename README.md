@@ -516,9 +516,9 @@ node --test
 ```
 
 ```
-ℹ tests 218
+ℹ tests 224
 ℹ suites 0
-ℹ pass 218
+ℹ pass 224
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
